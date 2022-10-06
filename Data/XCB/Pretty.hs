@@ -87,7 +87,7 @@ instance Pretty a => Pretty (Expression a) where
     toDoc (PopCount expr)
         = text "popcount" <> parens (toDoc expr)
     toDoc (SumOf ref)
-        = text "sumof" <> (parens $ char '$' <> text ref)
+        = text "sumof" <> parens (char '$' <> text ref)
     toDoc (Op binop exprL exprR)
         = parens $ hsep [toDoc exprL
                         ,toDoc binop
@@ -194,7 +194,7 @@ instance Pretty a => Pretty (GenXDecl a) where
     toDoc (XEvent nm n alignment elems _) =
         hang (text "Event:" <+> text nm <> char ',' <> toDoc n <+> toDoc alignment) 2 $
              vcat $ map toDoc elems
-    toDoc (XRequest nm n alignment elems mrep) = 
+    toDoc (XRequest nm n alignment elems mrep) =
         (hang (text "Request:" <+> text nm <> char ',' <> toDoc n <+> toDoc alignment) 2 $
              vcat $ map toDoc elems)
          $$ case mrep of
@@ -203,12 +203,12 @@ instance Pretty a => Pretty (GenXDecl a) where
                  hang (text "Reply:" <+> text nm <> char ',' <> toDoc n <+> toDoc repAlignment) 2 $
                       vcat $ map toDoc reply
     toDoc (XidType nm) = text "XID:" <+> text nm
-    toDoc (XidUnion nm elems) = 
+    toDoc (XidUnion nm elems) =
         hang (text "XID" <+> text "Union:" <+> text nm) 2 $
              vcat $ map toDoc elems
     toDoc (XEnum nm elems) =
         hang (text "Enum:" <+> text nm) 2 $ vcat $ map toDoc elems
-    toDoc (XUnion nm alignment elems) = 
+    toDoc (XUnion nm alignment elems) =
         hang (text "Union:" <+> text nm <+> toDoc alignment) 2 $ vcat $ map toDoc elems
     toDoc (XImport nm) = text "Import:" <+> text nm
     toDoc (XError nm _n alignment elems) =

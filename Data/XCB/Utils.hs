@@ -7,12 +7,11 @@ import Control.Applicative
 
 ensureUpper :: String -> String
 ensureUpper [] = []
-ensureUpper (x:xs) = (toUpper x) : xs
+ensureUpper (x:xs) = toUpper x : xs
 
 -- |Like mapMaybe, but for any Alternative.
 -- Never returns 'empty', instead returns 'pure []'
 mapAlt :: Alternative f => (a -> f b) -> [a] -> f [b]
-mapAlt f xs = go xs
+mapAlt f = go
  where go [] = pure []
-       go (y:ys) = pure (:) <*> f y <*> go ys
-               <|> go ys
+       go (y:ys) = liftA2 (:) (f y) (go ys) <|> go ys

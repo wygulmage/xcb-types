@@ -125,7 +125,7 @@ data Type = UnQualType Name
           | QualType Name Name
  deriving (Show, Eq, Ord)
 
-data GenXidUnionElem typ = XidUnionElem typ
+newtype GenXidUnionElem typ = XidUnionElem typ
  deriving (Show, Functor)
 
 -- Should only ever have expressions of type 'Value' or 'Bit'.

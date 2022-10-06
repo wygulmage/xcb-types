@@ -26,11 +26,12 @@ import Text.XML.Light
 
 import Data.List as List
 import qualified Data.Map as Map
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (mapMaybe)
 
-import Control.Monad (MonadPlus (mzero, mplus), guard, liftM, liftM2)
+import Control.Applicative (liftA2)
+import Control.Monad (MonadPlus (mzero, mplus), guard)
 import Control.Monad.Fail (MonadFail)
-import Control.Monad.Reader (ReaderT, runReaderT, ask, lift, withReaderT)
+import Control.Monad.Reader (ReaderT, runReaderT, asks, lift, withReaderT)
 
 import System.IO (openFile, IOMode (ReadMode), hSetEncoding, utf8, hGetContents)
 
@@ -40,7 +41,7 @@ import System.IO (openFile, IOMode (ReadMode), hSetEncoding, utf8, hGetContents)
 -- silently dropped.
 fromFiles :: [FilePath] -> IO [XHeader]
 fromFiles xs = do
-  strings <- sequence $ map readFileUTF8 xs
+  strings <- traverse readFileUTF8 xs
   return $ fromStrings strings
 
 -- | Like 'readFile', but forces the encoding
@@ -68,10 +69,10 @@ type Parse = ReaderT ([XHeader],Name) Maybe
 -- operations in the 'Parse' monad
 
 localName :: Parse Name
-localName = snd `liftM` ask
+localName = asks snd
 
 allModules :: Parse [XHeader]
-allModules = fst `liftM` ask
+allModules = asks fst
 
 -- Extract an Alignment from a list of Elements. This assumes that the
 -- required_start_align is the first element if it exists at all.
@@ -89,11 +90,11 @@ extractAlignment xs = return (Nothing, xs)
 -- this implements searching both the current module and
 -- the xproto module if the name is not specified.
 lookupThingy :: ([XDecl] -> Maybe a)
-             -> (Maybe Name)
+             -> Maybe Name
              -> Parse (Maybe a)
 lookupThingy f Nothing = do
   lname <- localName
-  liftM2 mplus (lookupThingy f $ Just lname)
+  liftA2 mplus (lookupThingy f $ Just lname)
                (lookupThingy f $ Just "xproto") -- implicit xproto import
 lookupThingy f (Just mname) = do
   xs <- allModules
@@ -206,7 +207,7 @@ xrequest el = do
   -- TODO - I don't think I like 'mapAlt' here.
   -- I don't want to be silently dropping fields
   (alignment, xs) <- extractAlignment $ elChildren el
-  fields <- mapAlt structField $ xs
+  fields <- mapAlt structField xs
   let reply = getReply el
   return $ XRequest nm code alignment fields reply
 
@@ -214,7 +215,7 @@ getReply :: Element -> Maybe XReply
 getReply el = do
   childElem <- unqual "reply" `findChild` el
   (alignment, xs) <- extractAlignment $ elChildren childElem
-  fields <- mapM structField xs
+  fields <- traverse structField xs
   guard $ not $ null fields
   return $ GenXReply alignment fields
 
@@ -222,9 +223,9 @@ xevent :: Element -> Parse XDecl
 xevent el = do
   name <- el `attr` "name"
   number <- el `attr` "number" >>= readM
-  let noseq = ensureUpper `liftM` (el `attr` "no-sequence-number") >>= readM
+  let noseq = (el `attr` "no-sequence-number") >>= readM . ensureUpper
   (alignment, xs) <- extractAlignment (elChildren el)
-  fields <- mapM structField $ xs
+  fields <- traverse structField xs
   guard $ not $ null fields
   return $ XEvent name number alignment fields noseq
 
@@ -273,7 +274,7 @@ xerror el = do
   name <- el `attr` "name"
   number <- el `attr` "number" >>= readM
   (alignment, xs) <- extractAlignment $ elChildren el
-  fields <- mapM structField $ xs
+  fields <- traverse structField xs
   return $ XError name number alignment fields
 
 
@@ -292,7 +293,7 @@ xstruct :: Element -> Parse XDecl
 xstruct el = do
   name <- el `attr` "name"
   (alignment, xs) <- extractAlignment $ elChildren el
-  fields <- mapAlt structField $ xs
+  fields <- mapAlt structField xs
   guard $ not $ null fields
   return $ XStruct name alignment fields
 
@@ -300,12 +301,12 @@ xunion :: Element -> Parse XDecl
 xunion el = do
   name <- el `attr` "name"
   (alignment, xs) <- extractAlignment $ elChildren el
-  fields <- mapAlt structField $ xs
+  fields <- mapAlt structField xs
   guard $ not $ null fields
   return $ XUnion name alignment fields
 
 xidtype :: Element -> Parse XDecl
-xidtype el = liftM XidType $ el `attr` "name"
+xidtype el = fmap XidType $ el `attr` "name"
 
 xidunion :: Element -> Parse XDecl
 xidunion el = do
@@ -321,7 +322,7 @@ xidUnionElem el = do
 
 xtypedef :: Element -> Parse XDecl
 xtypedef el = do
-  oldtyp <- liftM mkType $ el `attr` "oldname"
+  oldtyp <- fmap mkType $ el `attr` "oldname"
   newname <- el `attr` "newname"
   return $ XTypeDef newname oldtyp
 
@@ -342,9 +343,9 @@ allowedEvent el = do
 structField :: (MonadFail m, MonadPlus m, Functor m) => Element -> m StructElem
 structField el
     | el `named` "field" = do
-        typ <- liftM mkType $ el `attr` "type"
-        let enum = liftM mkType $ el `attr` "enum"
-        let mask = liftM mkType $ el `attr` "mask"
+        typ <- fmap mkType $ el `attr` "type"
+        let enum = fmap mkType $ el `attr` "enum"
+        let mask = fmap mkType $ el `attr` "mask"
         name <- el `attr` "name"
         return $ SField name typ enum mask
 
@@ -353,14 +354,14 @@ structField el
         return $ Pad bytes
 
     | el `named` "list" = do
-        typ <- liftM mkType $ el `attr` "type"
+        typ <- fmap mkType $ el `attr` "type"
         name <- el `attr` "name"
-        let enum = liftM mkType $ el `attr` "enum"
+        let enum = fmap mkType $ el `attr` "enum"
         let expr = firstChild el >>= expression
         return $ List name typ expr enum
 
     | el `named` "valueparam" = do
-        mask_typ <- liftM mkType $ el `attr` "value-mask-type"
+        mask_typ <- fmap mkType $ el `attr` "value-mask-type"
         mask_name <- el `attr` "value-mask-name"
         let mask_pad = el `attr` "value-mask-pad" >>= readM
         list_name <- el `attr` "value-list-name"
@@ -370,12 +371,12 @@ structField el
         nm <- el `attr` "name"
         (exprEl,caseEls) <- unconsChildren el
         expr <- expression exprEl
-        (alignment, xs) <- extractAlignment $ caseEls
-        cases <- mapM bitCase xs
+        (alignment, xs) <- extractAlignment caseEls
+        cases <- traverse bitCase xs
         return $ Switch nm expr alignment cases
 
     | el `named` "exprfield" = do
-        typ <- liftM mkType $ el `attr` "type"
+        typ <- fmap mkType $ el `attr` "type"
         name <- el `attr` "name"
         expr <- firstChild el >>= expression
         return $ ExprField name typ expr
@@ -385,11 +386,10 @@ structField el
     | el `named` "doc" = do
         fields <- el `children` "field"
         let mkField = \x -> fmap (\y -> (y, strContent x)) $ x `attr` "name"
-            fields' = Map.fromList $ catMaybes $ map mkField fields
+            fields' = Map.fromList $ mapMaybe mkField fields
             sees = findChildren (unqual "see") el
-            sees' = catMaybes $ flip map sees $ \s -> do typ <- s `attr` "type"
-                                                         name <- s `attr` "name"
-                                                         return (typ, name)
+            sees' = flip mapMaybe sees $ \s ->
+                liftA2 (,) (s `attr` "type") (s `attr` "name")
             brief = fmap strContent $ findChild (unqual "brief") el
         return $ Doc brief fields' sees'
 
@@ -411,8 +411,8 @@ bitCase el | el `named` "bitcase" || el `named` "case" = do
               let mName = el `attr` "name"
               (exprEl, fieldEls) <- unconsChildren el
               expr <- expression exprEl
-              (alignment, xs) <- extractAlignment $ fieldEls
-              fields <- mapM structField xs
+              (alignment, xs) <- extractAlignment fieldEls
+              fields <- traverse structField xs
               return $ BitCase mName expr alignment fields
            | otherwise =
               let name = elName el
@@ -427,15 +427,15 @@ expression el | el `named` "fieldref"
                    guard $ enumVal /= ""
                    return $ EnumRef enumTy enumVal
               | el `named` "value"
-                    = Value `liftM` readM (strContent el)
+                    = Value `fmap` readM (strContent el)
               | el `named` "bit"
-                    = Bit `liftM` do
+                    = Bit `fmap` do
                         n <- readM (strContent el)
                         guard $ n >= 0
                         return n
               | el `named` "op" = do
                     binop <- el `attr` "op" >>= toBinop
-                    [exprLhs,exprRhs] <- mapM expression $ elChildren el
+                    [exprLhs,exprRhs] <- traverse expression $ elChildren el
                     return $ Op binop exprLhs exprRhs
               | el `named` "unop" = do
                     op <- el `attr` "op" >>= toUnop
@@ -508,4 +508,4 @@ children :: MonadPlus m => Element -> String -> m [Element]
 
 -- adapted from Network.CGI.Protocol
 readM :: (MonadPlus m, Read a) => String -> m a
-readM = liftM fst . listToM . reads
+readM = fmap fst . listToM . reads
